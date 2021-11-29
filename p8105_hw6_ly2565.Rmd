@@ -7,6 +7,8 @@ output: github_document
 
 ```{r, setup, include = FALSE}
 library(tidyverse)
+library(modelr)
+library(mgcv)
 
 knitr::opts_chunk$set(
   fig.width = 6,
@@ -25,11 +27,76 @@ scale_colour_discrete = scale_colour_viridis_d
 scale_fill_discrete = scale_fill_viridis_d
 ```
 
+## Problem 1
 
+Load and clean the dataset.
+```{r, message = FALSE}
+birthweight_df = 
+  read_csv("data/birthweight.csv") %>% 
+  janitor::clean_names() %>% 
+  mutate(
+    babysex = as.factor(babysex)) %>% 
+  drop_na()
 
+birthweight_df
+```
 
+```{r}
+model1 = lm(bwt ~fincome + delwt + momage + pnumlbw + smoken + wtgain, data = birthweight_df)
 
+summary(model1)
+```
 
+```{r, warning = FALSE, dpi = 300}
+birthweight_df %>% 
+  add_predictions(model1) %>% 
+  add_residuals(model1) %>% 
+  ggplot(aes(x = pred, y = resid)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(color = "red", method = "lm", se = FALSE)
+```
+
+```{r}
+model2 = lm(bwt ~blength + gaweeks, data = birthweight_df)
+summary(model2)
+model3 = lm(bwt ~bhead + blength + babysex + 
+                 bhead * blength + bhead * babysex + blength * babysex +
+                 bhead * blength * babysex, data = birthweight_df)
+summary(model3)
+```
+
+Cross Validation
+```{r, warning = FALSE}
+cv_df =
+  crossv_mc(birthweight_df, 100) %>% 
+  mutate(
+    train = map(train, as_tibble),
+    test = map(test, as_tibble)) %>% 
+  mutate(
+    model1 = map(train, ~lm(bwt ~ fincome + delwt + momage + pnumlbw + smoken + wtgain, data = .x)),
+    model2 = map(train, ~lm(bwt ~blength + gaweeks, data = .x)),
+    model3 = map(train, ~lm(bwt ~bhead + blength + babysex + 
+                 bhead * blength + bhead * babysex + blength * babysex +
+                 bhead * blength * babysex, data = .x))) %>% 
+  mutate(
+    rmse_model1 = map2_dbl(model1, test, ~rmse(model = .x, data = .y)),
+    rmse_model2 = map2_dbl(model2, test, ~rmse(model = .x, data = .y)),
+    rmse_model3 = map2_dbl(model3, test, ~rmse(model = .x, data = .y)))
+  
+```
+
+```{r, dpi = 300}
+cv_df %>% 
+  select(starts_with("rmse")) %>% 
+  pivot_longer(
+    everything(),
+    names_to = "model", 
+    values_to = "rmse",
+    names_prefix = "rmse_") %>% 
+  mutate(model = fct_inorder(model)) %>% 
+  ggplot(aes(x = model, y = rmse)) + 
+  geom_boxplot()
+```
 
 
 
