@@ -138,6 +138,7 @@ weather_df =
 weather_df
 ```
 
+### Bootstrapping
 
 Draw 5000 bootstrap samples.
 ```{r}
@@ -148,6 +149,7 @@ boot_strap_df =
 boot_strap_df
 ```
 
+Produce an estimate of r squared for each bootstrap group and plot the distribution of estimates.
 ```{r}
 r_squared_results = 
   boot_strap_df %>% 
@@ -157,10 +159,20 @@ r_squared_results =
   select(-strap, -models) %>% 
   unnest(results)
 
-r_squared_results %>% 
-  ggplot(aes(x = adj.r.squared)) +
-  geom_density()
+r_squared_results
 
+r_squared_results %>% 
+  ggplot(aes(x = r.squared)) +
+  geom_density() +
+  labs(
+    x = "R Squared Estimates", 
+    y = "Density",
+    title = "Distribution of R Squared Estimates"
+  )
+```
+
+Calculate 95% confidence interval for adjusted r squared. 
+```{r}
 r_squared_results %>% 
   summarize(
     ci_lower = quantile(r.squared, 0.025),
@@ -168,6 +180,7 @@ r_squared_results %>%
   knitr::kable()
 ```
 
+Produce an estimate of log(beta0 * beta1) for each bootstrap group and plot the distribution of estimates.
 ```{r}
 log_results = 
   boot_strap_df %>% 
@@ -175,26 +188,35 @@ log_results =
     models = map(strap, ~lm(tmax ~ tmin, data = .x)),
     results = map(models, broom::tidy)) %>%
   select(-strap, -models) %>% 
-  unnest(results)
+  unnest(results) %>% 
+  select(.id, term, estimate) %>% 
+  pivot_wider(
+    names_from = "term",
+    values_from = "estimate") %>% 
+  rename(
+    beta0 = `(Intercept)`, 
+    beta1 = tmin) %>% 
+  mutate(log_beta0_beta1 = log(beta0 * beta1)) 
+ 
+log_results
 
-beta_0 = 
-  log_results %>% 
-  filter(term == "(Intercept)") %>% 
-  rename(beta_0_est = estimate)
+log_results %>% 
+  ggplot(aes(x = log_beta0_beta1)) +
+  geom_density() +
+  labs(
+    x = "Log(beta0 * beta1) Estimates",
+    y = "Density",
+    title = "Distribution of Estimates of log(beta0 * beta1)")
+```
 
-beta_1 = 
-  log_results %>% 
-  filter(term == "tmin") %>% 
-  rename(beta_1_est = estimate)
+Calculate 95% confidence interval for log(beta0 * beta1).
 
-df = 
-  left_join(beta_0, beta_1, by = ".id") %>% 
-  select(.id, beta_0_est, beta_1_est) %>% 
-  mutate(log = log(beta_0_est * beta_1_est)) %>% 
-  ggplot(aes(x = log)) +
-  geom_density()
-
-  
+```{r}
+log_results %>% 
+  summarize(
+    ci_lower = quantile(log_beta0_beta1, 0.025),
+    ci_upper = quantile(log_beta0_beta1, 0.975)) %>% 
+  knitr::kable()
 ```
 
 
