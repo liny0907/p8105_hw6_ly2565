@@ -34,15 +34,11 @@ scale_fill_discrete = scale_fill_viridis_d
 ```{r, message = FALSE}
 birthweight_df = 
   read_csv("data/birthweight.csv") %>% 
-  janitor::clean_names() %>% 
-  mutate(
-    babysex = as.factor(babysex),
-    frace = as.factor(frace),
-    malform = as.factor(malform),
-    mrace = as.factor(mrace))
+  janitor::clean_names()
 
 birthweight_df
 ```
+No need to convert numeric to factor for some variables, can fit regression model based on numeric values.
 
 ### Check for missing values
 ```{r}
@@ -52,52 +48,68 @@ There are no missing values in the dataset.
 
 ### Propose a regression model for birthweight
 
-fit regression using all predictors
+I built a regression model using a model selection approach called Backward Elimination which starts with all predictors in the model and then removes one predictor with the highest p value at a time until all p values are smaller than 0.01. 
 ```{r}
-mult.fit = lm(bwt ~ ., data = birthweight_df)
-summary(mult.fit)
+#fit regression model using all predictors
+fit_all = lm(bwt ~ ., data = birthweight_df)
+summary(fit_all)
 
-step1 = update(mult.fit, . ~ . -pnumlbw)
+#pnumlbw and pnumsga show NA, check the number of unique values in the two columns
+unique(pull(birthweight_df, pnumlbw))
+unique(pull(birthweight_df, pnumsga))
+
+#no pnumlbw
+step1 = update(fit_all, . ~ . -pnumlbw)
 summary(step1)
-
+#no pnumsga
 step2 = update(step1, . ~ . -pnumsga)
 summary(step2)
-
+#no wtgain
 step3 = update(step2, . ~ . -wtgain)
 summary(step3)
-
+#no ppbmi
 step4 = update(step3, . ~ . -ppbmi)
 summary(step4)
-
+#no malform
 step5 = update(step4, . ~ . -malform)
 summary(step5)
-
+#no frace
 step6 = update(step5, . ~ . -frace)
 summary(step6)
-
+#no menarche
 step7 = update(step6, . ~ . -menarche)
 summary(step7)
-
+#no parity
+step8 = update(step7, . ~ . -parity)
+summary(step8)
 ```
+Using the Backward Elimination approach, I first removed variables, `pnumlbw`, `pnumsga`, `wtgain` which returned NA for all estimates. The reason why `wtgain` showed NA might be that it highly correlated with other variables, like `delwt`: mother's weight at delivery and `ppwt`: mother's pre-pregnancy weight. In terms of `pnumlbw` and `pnumsga`, they returned NA because there were only values of 0 in the two columns. 
 
-
-
+After removing all non-significant predictors, I fitted a regression model for baby birthweight based on predictors: `babysex`, `bhead`, `blength`, `delwt`, `fincome`, `gaweeks`, `mheight`, `momage`, `mrace`, `ppwt`, and `smoken`. 
 ```{r}
-model1 = lm(bwt ~babysex + bhead + blength + delwt + fincome + gaweeks + mheight + momage + mrace + parity + ppwt + smoken, data = birthweight_df)
+model1 = lm(bwt ~babysex + bhead + blength + delwt + fincome + gaweeks + mheight + momage + mrace + ppwt + smoken, data = birthweight_df)
 
 summary(model1)
 broom::tidy(model1)
 ```
 
 Make a plot of model residuals against fitted values.
-```{r, warning = FALSE, dpi = 300}
+```{r, message = FALSE, dpi = 300}
 birthweight_df %>% 
   add_predictions(model1) %>% 
   add_residuals(model1) %>% 
   ggplot(aes(x = pred, y = resid)) +
-  geom_point(alpha = 0.3) +
-  geom_smooth(color = "red", method = "lm", se = FALSE)
+  geom_point(alpha = 0.2) +
+  geom_smooth(color = "red", method = "lm", se = FALSE) +
+  labs(
+    x = "Predicted Values",
+    y = "Residuals",
+    title = "Residuals vs Predicted Values"
+  )
 ```
+
+Based on this plot, residual values appear to be evenly distributed around 0, indicating constant variance of residuals. However, there are three predicted values less than 0, which may be outliers, and there are two obvious outliers with residuals over 2000. 
+
 
 ### Fit the other two models
 
@@ -123,7 +135,7 @@ cv_df =
     train = map(train, as_tibble),
     test = map(test, as_tibble)) %>% 
   mutate(
-    model1 = map(train, ~lm(bwt ~ babysex + bhead + blength + delwt + fincome + gaweeks + mheight + momage + mrace + parity + ppwt + smoken, data = .x)),
+    model1 = map(train, ~lm(bwt ~ babysex + bhead + blength + delwt + fincome + gaweeks + mheight + momage + mrace + ppwt + smoken, data = .x)),
     model2 = map(train, ~lm(bwt ~blength + gaweeks, data = .x)),
     model3 = map(train, ~lm(bwt ~bhead + blength + babysex + 
                  bhead * blength + bhead * babysex + blength * babysex +
@@ -131,7 +143,8 @@ cv_df =
   mutate(
     rmse_model1 = map2_dbl(model1, test, ~rmse(model = .x, data = .y)),
     rmse_model2 = map2_dbl(model2, test, ~rmse(model = .x, data = .y)),
-    rmse_model3 = map2_dbl(model3, test, ~rmse(model = .x, data = .y)))
+    rmse_model3 = map2_dbl(model3, test, ~rmse(model = .x, data = .y))) %>% 
+  select(-train, -test, -c(model1:model3))
 
 cv_df 
 ```
@@ -147,15 +160,21 @@ cv_df %>%
     names_prefix = "rmse_") %>% 
   mutate(model = fct_inorder(model)) %>% 
   ggplot(aes(x = model, y = rmse)) + 
-  geom_boxplot(aes(fill = model), alpha = 0.5)
+  geom_boxplot(aes(fill = model), alpha = 0.5) +
+  labs(
+    x = "Model",
+    y = "RMSE",
+    title = "RMSE vs Models"
+  )
 ```
-The boxplot indicates that model3 has the lowest prediction error distribution, and model1 has the highest one. This suggests that model3 is the best fit for birthweight among the three models. 
+
+The boxplot indicates that model1 has the lowest prediction error distribution, and model2 has the highest one. This suggests that model1 is the best fit for birthweight among the three models. 
 
 ## Problem 2
 
 ### Load the 2017 Central Park weather data
 
-```{r}
+```{r, message = FALSE}
 weather_df = 
   rnoaa::meteo_pull_monitors(
     c("USW00094728"),
@@ -182,8 +201,8 @@ boot_strap_df =
 boot_strap_df
 ```
 
-Produce estimates of r squared for each bootstrap sample and plot the distribution of estimates.
-```{r}
+Produce an estimate of r squared for each bootstrap sample and plot the distribution of estimates.
+```{r, dpi = 300}
 r_squared_results = 
   boot_strap_df %>% 
   mutate(
@@ -206,18 +225,17 @@ r_squared_results %>%
 
 Calculate 95% confidence interval for r squared. 
 ```{r}
-r_squared_ci = 
-  r_squared_results %>% 
+r_squared_results %>% 
   summarize(
     ci_lower = quantile(r.squared, 0.025),
     ci_upper = quantile(r.squared, 0.975)) %>% 
   knitr::kable()
 ```
-R squared estimates appear to be normally distributed with a mean of `r round(mean(pull(r_squared_results, r.squared)))` and sd of `r round(sd(pull(r_squared_results, r.squared)))`. There are no obvious outliers. The 95% confidence interval for r squared is `r r_squared_ci`. 
+R squared estimates appear to be normally distributed with a mean of `r round(mean(pull(r_squared_results, r.squared)), 3)` and sd of `r round(sd(pull(r_squared_results, r.squared)), 3)`. There are no obvious outliers. The 95% confidence interval for r squared is (0.894, 0.927). 
 
 
 Produce an estimate of log(beta0 * beta1) for each bootstrap group and plot the distribution of estimates.
-```{r}
+```{r, dpi = 300}
 log_results = 
   boot_strap_df %>% 
   mutate(
@@ -242,19 +260,18 @@ log_results %>%
   labs(
     x = "Log(beta0 * beta1) Estimates",
     y = "Density",
-    title = "Distribution of Estimates of log(beta0 * beta1)")
+    title = "Distribution of Estimates of Log(beta0 * beta1)")
 ```
 
 Calculate 95% confidence interval for log(beta0 * beta1).
 ```{r}
-log_ci = 
-  log_results %>% 
+log_results %>% 
   summarize(
     ci_lower = quantile(log, 0.025),
     ci_upper = quantile(log, 0.975)) %>% 
   knitr::kable()
 ```
-Log(beta0 * beta1) estimates appear to be normally distributed with a mean of `r round(mean(pull(log_results, log)), 3)` and sd of `r round(sd(pull(log_results, log)))`. There are no obvious outliers. The 95% confidence interval for log(beta0 * beta1) is `r log_ci`. 
+Log(beta0 * beta1) estimates appear to be normally distributed with a mean of `r round(mean(pull(log_results, log)), 3)` and sd of `r round(sd(pull(log_results, log)), 3)`. There are no obvious outliers. The 95% confidence interval for log(beta0 * beta1) is (1.967, 2.059). 
 
 
 
