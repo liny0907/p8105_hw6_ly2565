@@ -31,14 +31,25 @@ scale_fill_discrete = scale_fill_viridis_d
 ## Problem 1
 
 ### Load and clean the dataset for regression analysis
-```{r, message = FALSE}
+```{r, message = FALSE, warning = FALSE}
 birthweight_df = 
   read_csv("data/birthweight.csv") %>% 
-  janitor::clean_names()
+  janitor::clean_names() %>%
+  mutate(
+    babysex = as.factor(babysex),
+    babysex = fct_recode(babysex, "male" = "1", "female" = "2"),
+    frace = as.factor(frace),
+    frace = fct_recode(frace, "white" = "1", "black" = "2", "asian" = "3", 
+                       "puerto rican" = "4", "other" = "8", "unknown" = "9"),
+    malform = as.logical(malform),
+    mrace = as.factor(mrace),
+    mrace = fct_recode(mrace, "white" = "1", "black" = "2", "asian" = "3", 
+                       "puerto rican" = "4", "other" = "8", "unknown" = "9"))
+  
 
-birthweight_df
+birthweight_df 
 ```
-No need to convert numeric to factor for some variables, can fit regression model based on numeric values.
+
 
 ### Check for missing values
 ```{r}
@@ -48,13 +59,13 @@ There are no missing values in the dataset.
 
 ### Propose a regression model for birthweight
 
-I built a regression model using a model selection approach called Backward Elimination which starts with all predictors in the model and then removes one predictor with the highest p value at a time until all p values are smaller than 0.01. 
+I built a regression model using a model selection approach called *Backward Elimination* which starts with all predictors in the model and then removes one predictor with the highest p value at a time until all p values are smaller than 0.05. 
 ```{r}
 #fit regression model using all predictors
 fit_all = lm(bwt ~ ., data = birthweight_df)
 summary(fit_all)
 
-#pnumlbw and pnumsga show NA, check the number of unique values in the two columns
+#pnumlbw and pnumsga show NA, check unique values in the two columns
 unique(pull(birthweight_df, pnumlbw))
 unique(pull(birthweight_df, pnumsga))
 
@@ -67,27 +78,30 @@ summary(step2)
 #no wtgain
 step3 = update(step2, . ~ . -wtgain)
 summary(step3)
-#no ppbmi
-step4 = update(step3, . ~ . -ppbmi)
+#no frace
+step4 = update(step3, . ~ . -frace)
 summary(step4)
 #no malform
 step5 = update(step4, . ~ . -malform)
 summary(step5)
-#no frace
-step6 = update(step5, . ~ . -frace)
+#no ppbmi
+step6 = update(step5, . ~ . -ppbmi)
 summary(step6)
-#no menarche
-step7 = update(step6, . ~ . -menarche)
+#no momage
+step7 = update(step6, . ~ . -momage)
 summary(step7)
-#no parity
-step8 = update(step7, . ~ . -parity)
+#no menarche
+step8 = update(step7, . ~ . -menarche)
 summary(step8)
+#no mrace
+step9 = update(step8, . ~ . -mrace)
+summary(step9)
 ```
 Using the Backward Elimination approach, I first removed variables, `pnumlbw`, `pnumsga`, `wtgain` which returned NA for all estimates. The reason why `wtgain` showed NA might be that it highly correlated with other variables, like `delwt`: mother's weight at delivery and `ppwt`: mother's pre-pregnancy weight. In terms of `pnumlbw` and `pnumsga`, they returned NA because there were only values of 0 in the two columns. 
 
-After removing all non-significant predictors, I fitted a regression model for baby birthweight based on predictors: `babysex`, `bhead`, `blength`, `delwt`, `fincome`, `gaweeks`, `mheight`, `momage`, `mrace`, `ppwt`, and `smoken`. 
+After removing all non-significant predictors, I fitted a regression model for baby birthweight based on predictors: `babysex`, `bhead`, `blength`, `delwt`, `fincome`, `gaweeks`, `mheight`, `parity`, `ppwt`, and `smoken`. 
 ```{r}
-model1 = lm(bwt ~babysex + bhead + blength + delwt + fincome + gaweeks + mheight + momage + mrace + ppwt + smoken, data = birthweight_df)
+model1 = lm(bwt ~babysex + bhead + blength + delwt + fincome + gaweeks + mheight + parity + ppwt + smoken, data = birthweight_df)
 
 summary(model1)
 broom::tidy(model1)
@@ -108,7 +122,7 @@ birthweight_df %>%
   )
 ```
 
-Based on this plot, residual values appear to be evenly distributed around 0, indicating constant variance of residuals. However, there are three predicted values less than 0, which may be outliers, and there are two obvious outliers with residuals over 2000. 
+Based on this plot, residual values appear to be evenly distributed around 0, indicating constant variance of residuals. However, there are two predicted values less than 0, which may be outliers, and there are two obvious outliers with residuals over 2000. 
 
 
 ### Fit the other two models
@@ -135,7 +149,7 @@ cv_df =
     train = map(train, as_tibble),
     test = map(test, as_tibble)) %>% 
   mutate(
-    model1 = map(train, ~lm(bwt ~ babysex + bhead + blength + delwt + fincome + gaweeks + mheight + momage + mrace + ppwt + smoken, data = .x)),
+    model1 = map(train, ~lm(bwt ~ babysex + bhead + blength + delwt + fincome + gaweeks + mheight + parity + ppwt + smoken, data = .x)),
     model2 = map(train, ~lm(bwt ~blength + gaweeks, data = .x)),
     model3 = map(train, ~lm(bwt ~bhead + blength + babysex + 
                  bhead * blength + bhead * babysex + blength * babysex +
@@ -164,11 +178,11 @@ cv_df %>%
   labs(
     x = "Model",
     y = "RMSE",
-    title = "RMSE vs Models"
+    title = "Distribution of RMSE across Models"
   )
 ```
 
-The boxplot indicates that model1 has the lowest prediction error distribution, and model2 has the highest one. This suggests that model1 is the best fit for birthweight among the three models. 
+The boxplot indicates that model1 has the lowest prediction error distribution, and model2 has the highest one. This suggests that my model is the best fit for birthweight among the three models. 
 
 ## Problem 2
 
